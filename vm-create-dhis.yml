@@ -160,10 +160,14 @@
     - name: Enable TPM
       win_shell: |
         Import-Module Hyper-V
+        $vm = Get-VM -Name "{{ item.name }}"
+        $keyProtector = New-HgsKeyProtector -Owner $vm.Id -AllowUntrustedRoot
+        $vm | Add-VmKeyProtector -KeyProtector $keyProtector.RawData
         Enable-VMTPM -VMName "{{ item.name }}"
       with_items: "{{ vms }}"
       args:
         executable: powershell
+
 
     - name: Power on VMs
       win_shell: |
