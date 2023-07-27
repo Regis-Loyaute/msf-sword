@@ -1,0 +1,173 @@
+- name: Deploy VM on Hyper-V
+  hosts: all
+  gather_facts: no
+
+  vars:
+    code_projet: "{{ lookup('env', 'code_projet') }}"
+    type_machine: "{{ lookup('env', 'type_machine') }}"
+    environnement: "{{ lookup('env', 'environnement') }}"
+    hyperviseur: "{{ lookup('env', 'hyperviseur') }}"
+    
+    default_generation: 2
+    cpu: 4
+    memory: 4096MB
+
+    network:
+      ip: 192.168.1.180
+      subnet: 255.255.255.0
+      gateway: 192.168.1.1
+      dns: ["192.168.1.1", "1.1.1.1"]
+
+    network_switch: 'SW-1G'
+    src_iso: 'D:\ISO\autoinstall-ubuntu-22.04.iso'
+
+    vhdx_suffixes:
+      - name: 'DOCKER'
+        size: '10GB'
+      - name: 'VOLUMES'
+        size: '5GB'
+      - name: 'LOG'
+        size: '10GB'
+      - name: 'LIME'
+        size: '10GB'
+      - name: 'BCKP'
+        size: '10GB'
+
+  tasks:
+    - name: Determine next available VM number
+      win_shell: |
+        $code_projet = "{{ code_projet }}"
+        $type_machine = "{{ type_machine }}"
+        $environnement = "{{ environnement }}"
+
+        $regex = "^${code_projet}V${type_machine}(\d+)$environnement$"
+        $vm_names = Get-VM | Select-Object -ExpandProperty Name
+        $vm_numbers = $vm_names | ForEach-Object { if ($_ -match $regex) { [int]$matches[1] } } | Sort-Object
+        $next_vm_number = 1
+        foreach ($number in $vm_numbers) {
+          if ($number -gt $next_vm_number) { break }
+          $next_vm_number += 1
+        }
+        $next_vm_number.ToString("D3")
+      register: next_vm_number
+
+    - name: Set numero_machine variable
+      set_fact:
+        numero_machine: "{{ next_vm_number.stdout | trim }}"
+
+    - name: Set dest_vhd and vms variables
+      set_fact:
+        dest_vhd: 'D:\Virtual Hard Disks\{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}.vhdx'
+        vms:
+          - name: "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+
+    - name: Check if VM exists and create if it doesn't
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        if ($null -eq $vm) {
+          $vm = New-VM -Name $vm_name -Generation {{ default_generation }} -MemoryStartupBytes {{ memory }} -SwitchName {{ network_switch }}
+          Set-VMProcessor -VM $vm -Count {{ cpu }}
+        }        
+      register: vm_exists
+
+    - name: Attach ISO to VM
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        $dvdDrive = Get-VMDvdDrive -VM $vm | Where-Object { $_.ControllerLocation -eq "0" }
+        if ($dvdDrive -ne $null)
+        {
+            Set-VMDvdDrive -VM $vm -ControllerNumber $dvdDrive.ControllerNumber -ControllerLocation $dvdDrive.ControllerLocation -Path "{{ src_iso }}"
+        }
+        else
+        {
+            try {
+                Add-VMDvdDrive -VM $vm -ControllerNumber 0 -ControllerLocation 1 -Path "{{ src_iso }}"
+            } catch {
+                Write-Error "Failed to add DVD Drive: $_"
+            }
+        }        
+
+    - name: Create and attach VHDX if it does not exist
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $path = "D:\\Virtual Hard Disks\\lime\\${vm_name}OS.vhdx"
+        if (-not (Test-Path $path)) {
+          New-VHD -Path $path -Dynamic -SizeBytes 15GB
+        }
+        $vm = Get-VM -Name $vm_name
+        if ($null -ne $vm) {
+          $existingVhd = Get-VMHardDiskDrive -VMName $vm.Name | Where-Object { $_.Path -eq $path }
+          if ($existingVhd -eq $null) {
+            Add-VMHardDiskDrive -VM $vm -Path $path
+          }
+        }  
+      register: vhdx_exists 
+          
+    - name: Disable Secure Boot
+      win_shell: Set-VMFirmware -EnableSecureBoot Off -VMName "{{ item.name }}"
+      with_items: "{{ vms }}"
+
+    - name: Set VM to boot from DVD Drive first
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        $dvdDrive = Get-VMDvdDrive -VM $vm
+        Set-VMFirmware -VM $vm -FirstBootDevice $dvdDrive        
+
+    - name: Enable Guest Services
+      win_shell: Enable-VMIntegrationService -VMName "{{ item.name }}" -Name 'Guest Service Interface'
+      with_items: "{{ vms }}"
+
+    - name: Power on VMs
+      win_shell: |
+         $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+         $vm = Get-VM -Name $vm_name
+         if ($vm.State -eq 'Off') {
+           Start-VM -VM $vm
+         }         
+
+    - name: Wait for VM to get an IP
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        do {
+          Start-Sleep -Seconds 10
+          $vm = Get-VM -Name $vm_name
+          $ip = ($vm.NetworkAdapters.IPAddresses | Where-Object { $_ -like "*.*.*.*" })[0]
+        } while ($ip -eq $null)
+        Write-Output $ip                
+      register: vm_ip
+
+    - name: Configure network
+      win_shell: |
+        Get-VMNetworkAdapter -VMName {{ vms[0].name }} | Set-VMNetworkConfiguration -IPAddress {{ network.ip }} -Subnet {{ network.subnet }} -DNSServer {{ network.dns|join(",") }} -DefaultGateway {{ network.gateway }}
+
+    - name: Create and attach additional VHDX files
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        $suffix = "{{ item.name }}"
+        $path = "D:\\Virtual Hard Disks\\lime\\${vm_name}${suffix}.vhdx"
+        $sizeGB = "{{ item.size[:-2] }}"
+        $size = [int64]$sizeGB * 1GB
+        if (-not (Test-Path $path)) {
+          New-VHD -Path $path -Dynamic -SizeBytes $size
+        }
+        $existingVhd = Get-VMHardDiskDrive -VMName $vm.Name | Where-Object { $_.Path -eq $path }
+        if ($existingVhd -eq $null) {
+          Add-VMHardDiskDrive -VM $vm -Path $path
+        }        
+      loop: "{{ vhdx_suffixes }}"
+
+    - name: Remove DVD drive from VM
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        $dvdDrive = Get-VMDvdDrive -VM $vm
+        if ($dvdDrive -ne $null)
+        {
+            $dvdDrive | Remove-VMDvdDrive -Confirm:$false
+            Write-Output "DVD drive removed from the VM."
+        }

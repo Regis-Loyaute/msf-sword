@@ -1,0 +1,48 @@
+---
+- hosts: all
+  become: true
+  gather_facts: False
+  tasks:
+    - name: Install necessary packages
+      apt:
+        name: ['parted', 'openjdk-11-jdk', 'postgresql', 'postgresql-contrib', 'postgis', 'tomcat9']
+        state: present
+        update_cache: yes
+
+    - name: Create ext4 filesystem on devices
+      command: mkfs.ext4 {{ item }}
+      with_items:
+        - /dev/sdb
+        - /dev/sdc
+        - /dev/sdd
+        - /dev/sde
+        - /dev/sdf
+
+    - name: Create dhis2 user
+      user:
+        name: dhis2
+        home: /home/dhis2
+        shell: /bin/false
+        create_home: yes
+
+    - name: Create backup user
+      user:
+        name: backup
+        home: /home/backup
+        shell: /bin/false
+        create_home: yes
+
+    - name: Update /etc/fstab for /dev/sdb
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdb) /var ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sdc
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdc) /var/log ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sdd
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdd) /home ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sde
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sde) /home/dhis2 ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sdf
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdf) /home/backup ext4 defaults 0 0" >> /etc/fstab
