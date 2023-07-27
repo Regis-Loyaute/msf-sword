@@ -13,10 +13,12 @@
     memory: 4096MB
 
     network:
-      ip: 192.168.1.180
-      subnet: 255.255.255.0
-      gateway: 192.168.1.1
-      dns: ["192.168.1.1", "1.1.1.1"]
+      subnet: '192.168.1'
+      ip_start: 195
+      ip_end: 200
+      subnet_mask: '255.255.255.0'
+      gateway: '192.168.1.1'
+      dns: ['192.168.1.1', '1.1.1.1']
 
     network_switch: 'SW-1G'
     src_iso: 'D:\ISO\autoinstall-ubuntu-22.04.iso'
@@ -32,6 +34,8 @@
         size: '10GB'
       - name: 'BCKP'
         size: '10GB'
+    vms:
+      - name: "{{ env }}"
 
   tasks:
     - name: Determine next available VM number
@@ -48,7 +52,7 @@
           if ($number -gt $next_vm_number) { break }
           $next_vm_number += 1
         }
-        $next_vm_number.ToString("D3")
+        $next_vm_number.ToString("D3")        
       register: next_vm_number
 
     - name: Set numero_machine variable
@@ -68,7 +72,7 @@
         if ($null -eq $vm) {
           $vm = New-VM -Name $vm_name -Generation {{ default_generation }} -MemoryStartupBytes {{ memory }} -SwitchName {{ network_switch }}
           Set-VMProcessor -VM $vm -Count {{ cpu }}
-        }        
+        }                
       register: vm_exists
 
     - name: Attach ISO to VM
@@ -87,12 +91,12 @@
             } catch {
                 Write-Error "Failed to add DVD Drive: $_"
             }
-        }        
+        }                
 
     - name: Create and attach VHDX if it does not exist
       win_shell: |
         $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
-        $path = "D:\\Virtual Hard Disks\\lime\\${vm_name}OS.vhdx"
+        $path = "D:\\Virtual Hard Disks\\dhis\\${vm_name}-OS.vhdx"
         if (-not (Test-Path $path)) {
           New-VHD -Path $path -Dynamic -SizeBytes 15GB
         }
@@ -102,7 +106,7 @@
           if ($existingVhd -eq $null) {
             Add-VMHardDiskDrive -VM $vm -Path $path
           }
-        }  
+        }          
       register: vhdx_exists 
           
     - name: Disable Secure Boot
@@ -114,7 +118,7 @@
         $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
         $vm = Get-VM -Name $vm_name
         $dvdDrive = Get-VMDvdDrive -VM $vm
-        Set-VMFirmware -VM $vm -FirstBootDevice $dvdDrive        
+        Set-VMFirmware -VM $vm -FirstBootDevice $dvdDrive                
 
     - name: Enable Guest Services
       win_shell: Enable-VMIntegrationService -VMName "{{ item.name }}" -Name 'Guest Service Interface'
@@ -126,7 +130,7 @@
          $vm = Get-VM -Name $vm_name
          if ($vm.State -eq 'Off') {
            Start-VM -VM $vm
-         }         
+         }                  
 
     - name: Wait for VM to get an IP
       win_shell: |
@@ -137,19 +141,57 @@
           $vm = Get-VM -Name $vm_name
           $ip = ($vm.NetworkAdapters.IPAddresses | Where-Object { $_ -like "*.*.*.*" })[0]
         } while ($ip -eq $null)
-        Write-Output $ip                
+        Write-Output $ip                        
       register: vm_ip
+
+    - name: Power off VMs
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        if ($vm.State -ne 'Off') {
+          Stop-VM -VM $vm -Force
+        }         
+
+    - name: Enable Secure Boot with Microsoft UEFI Certificate Authority
+      win_shell: Set-VMFirmware -VMName "{{ item.name }}" -EnableSecureBoot On -SecureBootTemplate 'MicrosoftUEFICertificateAuthority'
+      with_items: "{{ vms }}"
+
+    - name: Power on VMs
+      win_shell: |
+        $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
+        $vm = Get-VM -Name $vm_name
+        if ($vm.State -eq 'Off') {
+          Start-VM -VM $vm
+        }
+
+    - name: Determine first available IP in the range
+      win_shell: |
+        $ipStart = {{ network.ip_start }}
+        $ipEnd = {{ network.ip_end }}
+        $subnet = "{{ network.subnet }}"
+        for ($i=$ipStart; $i -le $ipEnd; $i++) {
+            $ip = $subnet + "." + $i
+            if (!(Test-Connection -ComputerName $ip -Count 1 -Quiet)) {
+                return $ip
+            }
+        }
+        throw "No free IP address found in the specified range."
+      register: free_ip
+
+    - name: Wait for VM to fully boot
+      pause:
+        minutes: 1
 
     - name: Configure network
       win_shell: |
-        Get-VMNetworkAdapter -VMName {{ vms[0].name }} | Set-VMNetworkConfiguration -IPAddress {{ network.ip }} -Subnet {{ network.subnet }} -DNSServer {{ network.dns|join(",") }} -DefaultGateway {{ network.gateway }}
+        Get-VMNetworkAdapter -VMName {{ vms[0].name }} | Set-VMNetworkConfiguration -IPAddress {{ free_ip.stdout | trim }} -Subnet {{ network.subnet_mask }} -DNSServer {{ network.dns|join(",") }} -DefaultGateway {{ network.gateway }}
 
     - name: Create and attach additional VHDX files
       win_shell: |
         $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
         $vm = Get-VM -Name $vm_name
         $suffix = "{{ item.name }}"
-        $path = "D:\\Virtual Hard Disks\\lime\\${vm_name}${suffix}.vhdx"
+        $path = "D:\\Virtual Hard Disks\\dhis\\${vm_name}-${suffix}.vhdx"
         $sizeGB = "{{ item.size[:-2] }}"
         $size = [int64]$sizeGB * 1GB
         if (-not (Test-Path $path)) {
@@ -158,7 +200,7 @@
         $existingVhd = Get-VMHardDiskDrive -VMName $vm.Name | Where-Object { $_.Path -eq $path }
         if ($existingVhd -eq $null) {
           Add-VMHardDiskDrive -VM $vm -Path $path
-        }        
+        }                
       loop: "{{ vhdx_suffixes }}"
 
     - name: Remove DVD drive from VM

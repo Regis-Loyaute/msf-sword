@@ -2,13 +2,19 @@
 - hosts: all
   become: true
   gather_facts: False
+  vars:
+    users:
+      - name: user1
+        ssh_key: /path/to/user1_id_rsa.pub
+      - name: user2
+        ssh_key: /path/to/user2_id_rsa.pub
+      - name: user3
+        ssh_key: /path/to/user3_id_rsa.pub
+      - name: user4
+        ssh_key: /path/to/user4_id_rsa.pub
+      - name: user5
+        ssh_key: /path/to/user5_id_rsa.pub
   tasks:
-    - name: Install necessary packages
-      apt:
-        name: ['parted', 'openjdk-11-jdk', 'postgresql', 'postgresql-contrib', 'postgis', 'tomcat9']
-        state: present
-        update_cache: yes
-
     - name: Create ext4 filesystem on devices
       command: mkfs.ext4 {{ item }}
       with_items:
@@ -17,20 +23,6 @@
         - /dev/sdd
         - /dev/sde
         - /dev/sdf
-
-    - name: Create dhis2 user
-      user:
-        name: dhis2
-        home: /home/dhis2
-        shell: /bin/false
-        create_home: yes
-
-    - name: Create backup user
-      user:
-        name: backup
-        home: /home/backup
-        shell: /bin/false
-        create_home: yes
 
     - name: Update /etc/fstab for /dev/sdb
       shell: echo "UUID=$(blkid -s UUID -o value /dev/sdb) /var ext4 defaults 0 0" >> /etc/fstab
@@ -46,3 +38,63 @@
 
     - name: Update /etc/fstab for /dev/sdf
       shell: echo "UUID=$(blkid -s UUID -o value /dev/sdf) /home/backup ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Install necessary packages
+      apt:
+        name: ['parted', 'openjdk-11-jdk', 'postgresql', 'postgresql-contrib', 'postgis', 'tomcat9']
+        state: present
+        update_cache: yes
+
+    - name: Create dhis2 user
+      user:
+        name: dhis2
+        home: /home/dhis2
+        shell: /bin/false
+        create_home: yes
+
+    - name: Create backup user
+      user:
+        name: backup
+        home: /home/backup
+        shell: /bin/false
+        create_home: yes
+
+    - name: Create users and add ssh keys
+      loop: "{{ users }}"
+      user:
+        name: "{{ item.name }}"
+        shell: /bin/bash
+        create_home: yes
+        groups: sudo
+      register: user_result
+
+    - name: Read local ssh key
+      set_fact:
+        local_ssh_key: "{{ lookup('file', item.ssh_key) }}"
+      loop: "{{ users }}"
+      when: user_result.changed
+
+    - name: Set authorized key taken from file
+      authorized_key:
+        user: "{{ item.name }}"
+        state: present
+        key: "{{ local_ssh_key }}"
+      loop: "{{ users }}"
+      when: user_result.changed
+
+    - name: Disable password authentication
+      lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+      notify: Restart ssh
+
+    - name: Wipe known hosts
+      shell: find /root/.ssh -type f -delete
+
+  handlers:
+    - name: Restart ssh
+      service:
+        name: ssh
+        state: restarted

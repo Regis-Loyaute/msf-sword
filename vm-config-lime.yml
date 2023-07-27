@@ -2,6 +2,30 @@
 - hosts: all
   become: true
   tasks:
+    - name: Create ext4 filesystem on devices
+      command: mkfs.ext4 {{ item }}
+      with_items:
+        - /dev/sdb
+        - /dev/sdc
+        - /dev/sdd
+        - /dev/sde
+        - /dev/sdf
+
+    - name: Update /etc/fstab for /dev/sdb
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdb) /var/lib/mysql ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sdc
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdc) /var/log ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sdd
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdd) /home ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sde
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sde) /home/Lime ext4 defaults 0 0" >> /etc/fstab
+
+    - name: Update /etc/fstab for /dev/sdf
+      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdf) /home/backup ext4 defaults 0 0" >> /etc/fstab
+
     - name: Update apt-get repo and cache
       apt:
         update_cache: yes
@@ -26,27 +50,3 @@
       apt:
         name: openssl
         state: latest
-
-    - name: Create ext4 filesystem on devices
-      command: mkfs.ext4 {{ item }}
-      with_items:
-        - /dev/sdb
-        - /dev/sdc
-        - /dev/sdd
-        - /dev/sde
-        - /dev/sdf
-
-    - name: Update /etc/fstab for /dev/sdb
-      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdb) /var/lib/mysql ext4 defaults 0 0" >> /etc/fstab
-
-    - name: Update /etc/fstab for /dev/sdc
-      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdc) /var/log ext4 defaults 0 0" >> /etc/fstab
-
-    - name: Update /etc/fstab for /dev/sdd
-      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdd) /home ext4 defaults 0 0" >> /etc/fstab
-
-    - name: Update /etc/fstab for /dev/sde
-      shell: echo "UUID=$(blkid -s UUID -o value /dev/sde) /home/Lime ext4 defaults 0 0" >> /etc/fstab
-
-    - name: Update /etc/fstab for /dev/sdf
-      shell: echo "UUID=$(blkid -s UUID -o value /dev/sdf) /home/backup ext4 defaults 0 0" >> /etc/fstab
