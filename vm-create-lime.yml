@@ -156,6 +156,17 @@
       win_shell: Set-VMFirmware -VMName "{{ item.name }}" -EnableSecureBoot On -SecureBootTemplate 'MicrosoftUEFICertificateAuthority'
       with_items: "{{ vms }}"
 
+    - name: Enable TPM
+      win_shell: |
+        Import-Module Hyper-V
+        $vm = Get-VM -Name "{{ item.name }}"
+        $vm | Set-VMKeyProtector -NewLocalKeyProtector
+        $vm | Enable-VMEncryption
+        Enable-VMTPM -VMName "{{ item.name }}"
+      with_items: "{{ vms }}"
+      args:
+        executable: powershell
+
     - name: Power on VMs
       win_shell: |
         $vm_name = "{{ code_projet }}V{{ type_machine }}{{ numero_machine }}{{ environnement }}"
