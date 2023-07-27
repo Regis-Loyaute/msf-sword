@@ -161,13 +161,12 @@
       win_shell: |
         Import-Module Hyper-V
         $vm = Get-VM -Name "{{ item.name }}"
-        $keyProtector = New-HgsKeyProtector -Owner $vm.Id -AllowUntrustedRoot
-        $vm | Add-VmKeyProtector -KeyProtector $keyProtector.RawData
+        $vm | Set-VMKeyProtector -NewLocalKeyProtector
+        $vm | Enable-VMEncryption
         Enable-VMTPM -VMName "{{ item.name }}"
       with_items: "{{ vms }}"
       args:
         executable: powershell
-
 
     - name: Power on VMs
       win_shell: |
