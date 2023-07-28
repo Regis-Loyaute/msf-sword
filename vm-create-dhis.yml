@@ -1,5 +1,5 @@
 - name: Deploy VM on Hyper-V
-  hosts: all
+  hosts: "{{ hyperviseur }}"
   gather_facts: no
 
   vars:
