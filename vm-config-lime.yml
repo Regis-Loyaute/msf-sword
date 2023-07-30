@@ -33,8 +33,9 @@
       command: rsync -a "{{ item.mount }}/." "{{ item.temp_mount }}"
       loop: "{{ devices }}"
 
-    - name: Unmount original directories
+    - name: Unmount original directories if they are mount points
       command: umount "{{ item.mount }}"
+      when: ansible_mounts | selectattr('mount', 'equalto', item.mount) | list | count > 0
       loop: "{{ devices }}"
 
     - name: Update /etc/fstab
