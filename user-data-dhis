@@ -1,6 +1,12 @@
 #cloud-config
 autoinstall:
   version: 1
+  network:
+    version: 2
+    renderer: networkd
+    ethernets:
+      eth0:
+        dhcp4: yes
   packages:
     - dialog
     - linux-image-virtual
@@ -12,13 +18,14 @@ autoinstall:
     geoip: true
     preserve_sources_list: false
     primary:
-    - arches:
-      - amd64
-      - i386
-      uri: http://ch.archive.ubuntu.com/ubuntu
-    - arches:
-      - default
-      uri: http://ports.ubuntu.com/ubuntu-ports
+      - arches:
+        - amd64
+        - i386
+        uri: http://ch.archive.ubuntu.com/ubuntu
+      - arches:
+        - default
+        uri: http://ports.ubuntu.com/ubuntu-ports
+  updates: security
   disk_layout:
     - id: disk0
       type: gpt
@@ -55,8 +62,6 @@ autoinstall:
     allow-pw: true
     authorized-keys: []
     install-server: true
-##  updates: security
-  version: 1
   late-commands:
     - 'echo "auto eth0\niface eth0 inet static\naddress 192.168.0.10\nnetmask 255.255.255.0\ngateway 192.168.0.1\nbroadcast 192.168.0.255\ndns-nameservers 192.168.0.2 192.168.0.3\ndns-search lan" >> /target/etc/network/interfaces'
     - 'echo -e "[Resolve]\nDNS=8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844" >> /target/etc/systemd/resolved.conf'
