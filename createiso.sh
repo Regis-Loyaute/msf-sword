@@ -34,7 +34,7 @@ cat << EOF > /tmp/iso_new/boot/grub/grub.cfg
 set timeout=10
 menuentry "Autoinstall Ubuntu Server" {
     set gfxpayload=keep
-    linux   /casper/vmlinuz quiet autoinstall ds=nocloud\;s=/cdrom/nocloud/  ---
+    linux   /casper/vmlinuz quiet autoinstall ip=dhcp ds=nocloud\;s=/cdrom/nocloud/  ---
 ##    linux   /casper/vmlinuz quiet autoinstall ds='nocloud-net;s=http://192.168.1.175:3003/'  ---
 
     initrd  /casper/initrd
